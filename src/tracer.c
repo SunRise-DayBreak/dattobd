@@ -367,6 +367,15 @@ static int file_is_on_bdev(const struct dattobd_mutable_file *dfilp, struct bloc
                 LOG_DEBUG("sb name:%s, file->sb name:%s", sb->s_root->d_name.name, sb_file->s_root->d_name.name);
                 ret = (dfilp->mnt->mnt_sb == sb);
                 dattobd_drop_super(sb);
+        } else if (bdev_whole(bdev) == bdev && sb_file && sb_file->s_bdev) {
+                /* POC [whole-disk]：带分区表的整盘自身没有 super_block，
+                 * 原来的"COW 必须与 base 同一 sb"校验不适用。整盘模式要求
+                 * COW 文件位于另一块盘（不同 request_queue），绝不能放在
+                 * 本整盘的任一分区上——否则 COW 写自身会被 tracing_mrf
+                 * 拦截，既可能自引用，也会污染快照视图。
+                 */
+                ret = (bdev_get_queue(sb_file->s_bdev) !=
+                       bdev_get_queue(bdev));
         }
         return ret;
 }
@@ -989,7 +998,7 @@ static int __tracer_setup_snap(struct snap_device *dev, unsigned int minor,
 #elif defined HAVE_BLK_ALLOC_DISK_2
         dev->sd_gd = blk_alloc_disk(NULL, NUMA_NO_NODE);
 #else
-        dev->sd_gd = alloc_disk(1);
+        dev->sd_gd = alloc_disk(256);
 #endif
 
         if (!dev->sd_gd) {
@@ -1050,7 +1059,7 @@ static int __tracer_setup_snap(struct snap_device *dev, unsigned int minor,
         dev->sd_gd->private_data = dev;
         dev->sd_gd->major = major;
         dev->sd_gd->first_minor = minor;
-        dev->sd_gd->minors = 1;
+        dev->sd_gd->minors = 256;
         dev->sd_gd->fops = get_snap_ops();
         dev->sd_gd->queue = dev->sd_queue;
 
@@ -1315,13 +1324,19 @@ static int __tracer_transition_tracing(
         // we do not allow freeze to fail during starting tracing
         // we allow freeze to fail in case of finishing tracing and device is in fail condition
         ret = __try_freeze_bdev(bdev, &sb);
+        /* POC [whole-disk]：整盘没有可冻结的 super_block，
+         * __try_freeze_bdev 返回 -ENOENT。整盘 tracing 启动时不要因此
+         * 中止；一致性由调用方在 setup 前对分区做 sync/fsfreeze 保证。*/
+        if (ret == -ENOENT && bdev_whole(bdev) == bdev) {
+                ret = 0;
+        }
         if(ret != 0 && start_tracing){
                 return ret;
         }
         if(ret != 0 && !start_tracing && tracer_read_fail_state(dev) == 0){
                 return ret;
         }
-        freezed = (ret == 0);
+        freezed = (ret == 0 && sb != NULL);
         smp_wmb();
         if(start_tracing){
                 LOG_DEBUG("starting tracing");

@@ -95,7 +95,7 @@ static int __verify_minor(unsigned int minor, int mode, snap_device_array snap_d
  * is writable.
  * * !0 - errno indicating the error.
  */
-static int __verify_bdev_writable(const char *bdev_path, int *out)
+static int __verify_bdev_writable(const char *bdev_path, int *out, int *whole)
 {
         int writable = 0;
         struct bdev_wrapper *bdev_w;
@@ -108,6 +108,9 @@ static int __verify_bdev_writable(const char *bdev_path, int *out)
                 *out = 0;
                 return PTR_ERR(bdev_w);
         }
+
+        if (whole)
+                *whole = (bdev_whole(bdev_w->bdev) == bdev_w->bdev);
 
         sb = dattobd_get_super(bdev_w->bdev);
         if (!IS_ERR_OR_NULL(sb)) {
@@ -142,7 +145,7 @@ static int __ioctl_setup(unsigned int minor, const char *bdev_path,
                   const char *cow_path, unsigned long fallocated_space,
                   unsigned long cache_size, int is_snap, int is_reload)
 {
-        int ret, is_mounted;
+        int ret, is_mounted, is_whole = 0;
         struct snap_device *dev = NULL;
         snap_device_array_mut snap_devices = get_snap_device_array_mut();
 
@@ -157,12 +160,21 @@ static int __ioctl_setup(unsigned int minor, const char *bdev_path,
                 goto error;
         }
         // check if block device is mounted
-        ret = __verify_bdev_writable(bdev_path, &is_mounted);
+        ret = __verify_bdev_writable(bdev_path, &is_mounted, &is_whole);
         if (ret){
                  LOG_ERROR(ret, "__verify_bdev_writable");
                 goto error;
         }
         // check that reload / setup command matches current mount state
+        /* POC [whole-disk]：带分区表的整盘自身没有文件系统（其分区才是
+         * 挂载对象），__verify_bdev_writable 会返回 is_mounted=0。此时
+         * 允许首次 setup（一致性由调用方负责，如先 sync/fsfreeze）。
+         */
+        if (!is_mounted && is_whole && !is_reload) {
+                LOG_DEBUG("whole disk '%s' has no own filesystem; allowing setup",
+                          bdev_path);
+                is_mounted = 1;
+        }
         if (is_mounted && is_reload) {
                 ret = -EINVAL;
                 LOG_ERROR(ret, "illegal to perform reload while mounted");
