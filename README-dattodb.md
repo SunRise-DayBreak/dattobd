@@ -1,22 +1,24 @@
-# dattodb
+# dattodb（整盘快照版）
 
 dattobd 整盘快照版本：支持对带分区表的整盘（如 `/dev/sdb`）做只读一致性快照。
 
 ## 源码仓库
 
-`src/` 是 dattobd 的 git 源码仓（fork 自 [datto/dattobd](https://github.com/datto/dattobd)），整盘快照定制改动在 `bada-beta.1` 分支：
+本目录即 dattobd 的 git 源码仓（fork 自 [datto/dattobd](https://github.com/datto/dattobd)），整盘快照定制改动在 `bada-beta.1` 分支：
 
 - fork / origin：`https://github.com/SunRise-DayBreak/dattobd.git`
 - upstream：`https://github.com/datto/dattobd.git`
-- 定制分支：`bada-beta.1`（基于上游 `v0.12.1`）
-- 同步上游：`cd src && git fetch upstream && git merge --ff-only upstream/main`（定制改动保持在 `bada-beta.1`）
+- 定制分支：`bada-beta.1`（基于上游 `v0.12.1`，当前提交见 `git log`）
+- 同步上游：`git fetch upstream && git merge --ff-only upstream/main`（定制改动保持在 `bada-beta.1`）
 
-`prebuilt/`（预编译产物）与本 `README.md`（打包说明）**不在源码仓内**。
+说明：
+- 上游原始 README 保留为 `README.md`；本文件 `README-dattodb.md` 是整盘快照版的安装/编译/使用说明
+- `prebuilt/` 为预编译产物，已在 `.gitignore` 中忽略，不入库
 
 ## 环境要求
 
 - CentOS / RHEL 7.x x86_64，内核 3.10.x，root 权限
-- 预编译模块适用于内核 `3.10.0-1160.71.1.el7.x86_64`；其它内核需从 `src/` 编译（gcc、make、kernel-devel-$(uname -r)）
+- 预编译模块适用于内核 `3.10.0-1160.71.1.el7.x86_64`；其它内核需从源码编译（gcc、make、kernel-devel-$(uname -r)）
 
 ## 安装部署
 
@@ -34,10 +36,9 @@ cp prebuilt/dbdctl /usr/local/bin/dbdctl
 chmod 755 /usr/local/bin/dbdctl
 ```
 
-### 源码编译（内核不匹配时）
+### 源码编译（内核不匹配时，在仓库根执行）
 
 ```bash
-cd src
 make -C src
 make -C lib static CCFLAGS="-Wall -std=gnu99 -I$PWD/src"
 make -C app static CCFLAGS="-Wall -std=gnu99 -I$PWD/src -I$PWD/lib" BASE_DIR="$PWD"
